@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Tic Tac Toe</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { RotateCcw, Copy, Check, Users } = lucide;
+
+        function Icon({ icon: IconComponent, ...props }) {
+            const [svg, setSvg] = React.useState(null);
+            
+            React.useEffect(() => {
+                if (IconComponent) {
+                    const iconElement = IconComponent.toSvg(props);
+                    setSvg(iconElement);
+                }
+            }, [IconComponent, props]);
+            
+            return svg ? <span dangerouslySetInnerHTML={{ __html: svg }} /> : null;
+        }
+
+        function MultiplayerTicTacToe() {
+            const [gameId, setGameId] = useState('');
+            const [playerSymbol, setPlayerSymbol] = useState(null);
+            const [board, setBoard] = useState(Array(9).fill(null));
+            const [isMyTurn, setIsMyTurn] = useState(false);
+            const [winner, setWinner] = useState(null);
+            const [winningLine, setWinningLine] = useState([]);
+            const [gameState, setGameState] = useState('menu');
+            const [opponentConnected, setOpponentConnected] = useState(false);
+            const [copied, setCopied] = useState(false);
+            const [pollInterval, setPollInterval] = useState(null);
+
+            const winningCombinations = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                [0, 4, 8], [2, 4, 6]
+            ];
+
+            const checkWinner = (currentBoard) => {
+                for (let combo of winningCombinations) {
+                    const [a, b, c] = combo;
+                    if (currentBoard[a] && currentBoard[a] === currentBoard[b] && currentBoard[a] === currentBoard[c]) {
+                        return { winner: currentBoard[a], line: combo };
+                    }
+                }
+                
+                if (currentBoard.every(cell => cell !== null)) {
+                    return { winner: 'draw', line: [] };
+                }
+                
+                return null;
+            };
+
+            const generateGameId = () => {
+                return Math.random().toString(36).substring(2, 10).toUpperCase();
+            };
+
+            const createGame = () => {
+                const newGameId = generateGameId();
+                const newGameState = {
+                    gameId: newGameId,
+                    board: Array(9).fill(null),
+                    currentPlayer: 'X',
+                    players: { X: 'creator', O: null },
+                    winner: null,
+                    winningLine: []
+                };
+                
+                localStorage.setItem(`game_${newGameId}`, JSON.stringify(newGameState));
+                setGameId(newGameId);
+                setPlayerSymbol('X');
+                setIsMyTurn(true);
+                setGameState('waiting');
+                startPolling(newGameId, 'X');
+            };
+
+            const joinGame = (id) => {
+                const savedGame = localStorage.getItem(`game_${id}`);
+                if (!savedGame) {
+                    alert('Game not found! Please check the game ID.');
+                    return;
+                }
+
+                const game = JSON.parse(savedGame);
+                if (game.players.O) {
+                    alert('This game already has two players!');
+                    return;
+                }
+
+                game.players.O = 'joiner';
+                localStorage.setItem(`game_${id}`, JSON.stringify(game));
+                
+                setGameId(id);
+                setPlayerSymbol('O');
+                setBoard(game.board);
+                setIsMyTurn(game.currentPlayer === 'O');
+                setOpponentConnected(true);
+                setGameState('playing');
+                startPolling(id, 'O');
+            };
+
+            const startPolling = (id, symbol) => {
+                const interval = setInterval(() => {
+                    pollGameState(id, symbol);
+                }, 1000);
+                setPollInterval(interval);
+            };
+
+            const pollGameState = (id, symbol) => {
+                const savedGame = localStorage.getItem(`game_${id}`);
+                if (!savedGame) return;
+
+                const game = JSON.parse(savedGame);
+                
+                if (symbol === 'X' && game.players.O && !opponentConnected) {
+                    setOpponentConnected(true);
+                    setGameState('playing');
+                }
+
+                setBoard(game.board);
+                setIsMyTurn(game.currentPlayer === symbol);
+                
+                if (game.winner) {
+                    setWinner(game.winner);
+                    setWinningLine(game.winningLine);
+                    setGameState('finished');
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                    }
+                }
+            };
+
+            const makeMove = (index) => {
+                if (!isMyTurn || board[index] || winner) return;
+
+                const savedGame = localStorage.getItem(`game_${gameId}`);
+                if (!savedGame) return;
+
+                const game = JSON.parse(savedGame);
+                game.board[index] = playerSymbol;
+                
+                const result = checkWinner(game.board);
+                if (result) {
+                    game.winner = result.winner;
+                    game.winningLine = result.line;
+                } else {
+                    game.currentPlayer = playerSymbol === 'X' ? 'O' : 'X';
+                }
+
+                localStorage.setItem(`game_${gameId}`, JSON.stringify(game));
+                setBoard(game.board);
+                setIsMyTurn(false);
+                
+                if (result) {
+                    setWinner(result.winner);
+                    setWinningLine(result.line);
+                    setGameState('finished');
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                    }
+                }
+            };
+
+            const resetGame = () => {
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                }
+                setGameId('');
+                setPlayerSymbol(null);
+                setBoard(Array(9).fill(null));
+                setIsMyTurn(false);
+                setWinner(null);
+                setWinningLine([]);
+                setGameState('menu');
+                setOpponentConnected(false);
+            };
+
+            const copyGameId = () => {
+                navigator.clipboard.writeText(gameId);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                    }
+                };
+            }, [pollInterval]);
+
+            if (gameState === 'menu') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
+                            <div className="text-center mb-8">
+                                <div className="flex justify-center mb-4">
+                                    <Icon icon={Users} size={64} className="text-purple-600" />
+                                </div>
+                                <h1 className="text-4xl font-bold text-gray-800 mb-2">
+                                    Multiplayer Tic Tac Toe
+                                </h1>
+                                <p className="text-gray-600">Play with friends online!</p>
+                            </div>
+
+                            <div className="space-y-4">
+                                <button
+                                    onClick={createGame}
+                                    className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200 shadow-lg"
+                                >
+                                    Create New Game
+                                </button>
+
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <div className="w-full border-t border-gray-300"></div>
+                                    </div>
+                                    <div className="relative flex justify-center text-sm">
+                                        <span className="px-4 bg-white text-gray-500">or</span>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <input
+                                        type="text"
+                                        placeholder="Enter Game ID"
+                                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-purple-500 focus:outline-none mb-3"
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter' && e.target.value) {
+                                                joinGame(e.target.value.toUpperCase());
+                                            }
+                                        }}
+                                        onChange={(e) => e.target.value = e.target.value.toUpperCase()}
+                                    />
+                                    <button
+                                        onClick={(e) => {
+                                            const input = e.target.previousElementSibling;
+                                            if (input.value) joinGame(input.value);
+                                        }}
+                                        className="w-full bg-gray-200 text-gray-700 py-3 px-6 rounded-xl font-semibold hover:bg-gray-300 transition-all duration-200"
+                                    >
+                                        Join Game
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (gameState === 'waiting') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
+                            <div className="text-center">
+                                <div className="animate-bounce mb-6 flex justify-center">
+                                    <Icon icon={Users} size={64} className="text-purple-600" />
+                                </div>
+                                <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                                    Waiting for Opponent...
+                                </h2>
+                                <p className="text-gray-600 mb-6">
+                                    Share this Game ID with your friend:
+                                </p>
+                                
+                                <div className="bg-gradient-to-r from-purple-100 to-pink-100 rounded-xl p-4 mb-6">
+                                    <div className="text-3xl font-bold text-purple-600 tracking-wider mb-3">
+                                        {gameId}
+                                    </div>
+                                    <button
+                                        onClick={copyGameId}
+                                        className="inline-flex items-center gap-2 bg-white text-purple-600 py-2 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-all duration-200"
+                                    >
+                                        {copied ? (
+                                            <>
+                                                <Icon icon={Check} size={18} />
+                                                Copied!
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Icon icon={Copy} size={18} />
+                                                Copy Game ID
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+
+                                <button
+                                    onClick={resetGame}
+                                    className="text-gray-500 hover:text-gray-700 font-semibold"
+                                >
+                                    Cancel Game
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
+                        <div className="flex justify-between items-center mb-6">
+                            <h1 className="text-3xl font-bold text-gray-800">Tic Tac Toe</h1>
+                            <div className="text-sm bg-gray-100 px-3 py-1 rounded-full">
+                                Game: <span className="font-bold">{gameId}</span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className={`rounded-lg p-3 text-center ${playerSymbol === 'X' ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                                <div className="text-sm text-gray-600 mb-1">You</div>
+                                <div className={`text-2xl font-bold ${playerSymbol === 'X' ? 'text-blue-600' : 'text-pink-600'}`}>
+                                    Player {playerSymbol}
+                                </div>
+                            </div>
+                            <div className={`rounded-lg p-3 text-center ${playerSymbol === 'O' ? 'bg-pink-100' : 'bg-gray-100'}`}>
+                                <div className="text-sm text-gray-600 mb-1">Opponent</div>
+                                <div className={`text-2xl font-bold ${playerSymbol === 'O' ? 'text-blue-600' : 'text-pink-600'}`}>
+                                    Player {playerSymbol === 'X' ? 'O' : 'X'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mb-6 h-8">
+                            {winner ? (
+                                <div className="text-2xl font-bold">
+                                    {winner === 'draw' ? (
+                                        <span className="text-gray-600">It's a Draw!</span>
+                                    ) : winner === playerSymbol ? (
+                                        <span className="text-green-600">You Win! 🎉</span>
+                                    ) : (
+                                        <span className="text-red-600">You Lose</span>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-xl font-semibold">
+                                    {isMyTurn ? (
+                                        <span className="text-green-600">Your Turn</span>
+                                    ) : (
+                                        <span className="text-gray-600">Opponent's Turn...</span>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3 mb-6 aspect-square">
+                            {board.map((cell, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => makeMove(index)}
+                                    className={`
+                                        aspect-square rounded-xl text-5xl font-bold
+                                        transition-all duration-200 transform
+                                        ${!cell && isMyTurn && !winner ? 'hover:scale-105 cursor-pointer' : 'cursor-not-allowed'}
+                                        ${winningLine.includes(index) 
+                                            ? cell === 'X' 
+                                                ? 'bg-blue-200 border-4 border-blue-500' 
+                                                : 'bg-pink-200 border-4 border-pink-500'
+                                            : 'bg-gray-50 hover:bg-gray-100 border-2 border-gray-200'
+                                        }
+                                        ${cell === 'X' ? 'text-blue-600' : 'text-pink-600'}
+                                    `}
+                                    disabled={!!cell || !isMyTurn || !!winner}
+                                >
+                                    {cell}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={resetGame}
+                                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-purple-600 hover:to-pink-600 transition-all duration-200 flex items-center justify-center gap-2"
+                            >
+                                <Icon icon={RotateCcw} size={20} />
+                                New Game
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<MultiplayerTicTacToe />);
+    </script>
+</body>
+</html>
